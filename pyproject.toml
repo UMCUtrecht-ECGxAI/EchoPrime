@@ -3,10 +3,8 @@ name = "echoprime"
 version = "0.1.0"
 description = "EchoPrime: multimodal echocardiography foundation model"
 readme = "README.md"
-requires-python = ">= 3.10"
+requires-python = ">=3.10"
 dependencies = [
-    "torch>=2.1",
-    "torchvision>=0.16",
     "transformers>=4.30",
     "numpy>=1.24",
     "ipywidgets>=8.1",
@@ -19,9 +17,66 @@ dependencies = [
     "mysql-connector-python>=8.0",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+# -----------------------------
+# PyTorch variants
+# -----------------------------
 
-[tool.hatch.build.targets.wheel]
-packages = ["echo_prime", "utils"]
+[project.optional-dependencies]
+cpu = [
+    "torch>=2.1",
+    "torchvision>=0.16",
+]
+
+cuda118 = [
+    "torch==2.1.0",
+    "torchvision==0.16.0",
+]
+
+cuda121 = [
+    "torch==2.2.2",
+    "torchvision==0.17.2",
+]
+
+dev = [
+    "pytest",
+    "pytest-timeout",
+    "pytest-xdist",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+# -----------------------------
+# uv configuration
+# -----------------------------
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "cuda118" },
+        { extra = "cuda121" },
+    ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu118", extra = "cuda118" },
+    { index = "pytorch-cu121", extra = "cuda121" },
+]
+
+torchvision = [
+    { index = "pytorch-cu118", extra = "cuda118" },
+    { index = "pytorch-cu121", extra = "cuda121" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu118"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
