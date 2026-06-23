@@ -5,6 +5,7 @@ import glob
 import json
 import pickle
 import random
+from pathlib import Path
 
 # Third-party library imports
 import torch
@@ -20,25 +21,36 @@ import sklearn
 import sklearn.metrics
 import transformers
 
-
 # Local module imports
-import utils
+_EP_ROOT = Path(__file__).resolve().parent.parent
+from echo_prime.ep_utils import utils
 
 class EchoPrime:
-    def __init__(self, device=None, lang='en'):
+    def __init__(self, device=None, weights_dir=None, lang='en', load_retrieval_data=True):
         """
         Initialize EchoPrime
-        
+
         Args:
             device: Device PyTorch cpu or cuda, it will automatically use cuda if available
+            weights_dir: Path to model weights directory. Defaults to <package>/model_data/weights/
             lang (str): language ('en' for english, 'it' for italian) - default to english
+            load_retrieval_data: If False, skip candidate embeddings / MIL weights / language init
+                (lighter init when only the encoder or view_classifier is needed).
         """
+        pkg_root = _EP_ROOT
+        if weights_dir is None:
+            weights_dir = pkg_root / "model_data" / "weights"
+        weights_dir = Path(weights_dir)
 
-        # load language specific files
-        utils.initialize_language(lang)
-        
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        checkpoint = torch.load("model_data/weights/echo_prime_encoder.pt",map_location=device)
+        if load_retrieval_data:
+            utils.initialize_language(lang)
+
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        else:
+            device = torch.device(device)
+
+        checkpoint = torch.load(weights_dir / "echo_prime_encoder.pt", map_location=device, weights_only=True)
         echo_encoder = torchvision.models.video.mvit_v2_s()
         echo_encoder.head[-1] = torch.nn.Linear(echo_encoder.head[-1].in_features, 512)
         echo_encoder.load_state_dict(checkpoint)
@@ -46,8 +58,8 @@ class EchoPrime:
         echo_encoder.to(device)
         for param in echo_encoder.parameters():
             param.requires_grad = False
-            
-        vc_state_dict = torch.load("model_data/weights/view_classifier.pt")
+
+        vc_state_dict = torch.load(weights_dir / "view_classifier.pt", map_location=device, weights_only=True)
         view_classifier = torchvision.models.convnext_base()
         view_classifier.classifier[-1] = torch.nn.Linear(
             view_classifier.classifier[-1].in_features, 11
@@ -58,7 +70,7 @@ class EchoPrime:
         view_classifier.eval()
         for param in view_classifier.parameters():
             param.requires_grad = False
-        
+
         self.echo_encoder = echo_encoder
         self.view_classifier = view_classifier
         self.frames_to_take=32
@@ -69,20 +81,22 @@ class EchoPrime:
         self.device=device
         self.lang = lang
 
-        # load MIL weights per section
-        self.MIL_weights = pd.read_csv("assets/MIL_weights.csv")
-        self.non_empty_sections=self.MIL_weights['Section']
-        self.section_weights=self.MIL_weights.iloc[:,1:].to_numpy()
-    
-        # Load candidate reports
-        self.candidate_studies=list(pd.read_csv("model_data/candidates_data/candidate_studies.csv")['Study'])
-        candidate_embeddings_p1=torch.load("model_data/candidates_data/candidate_embeddings_p1.pt")
-        candidate_embeddings_p2=torch.load("model_data/candidates_data/candidate_embeddings_p2.pt")
-        self.candidate_embeddings=torch.cat((candidate_embeddings_p1,candidate_embeddings_p2),dim=0)
-        candidate_reports=pd.read_pickle("model_data/candidates_data/candidate_reports.pkl")
-        self.candidate_reports = [utils.phrase_decode(vec_phr) for vec_phr in tqdm(candidate_reports)]
-        self.candidate_labels = pd.read_pickle("model_data/candidates_data/candidate_labels.pkl")
-        self.section_to_phenotypes = pd.read_pickle("assets/section_to_phenotypes.pkl")
+        if load_retrieval_data:
+            # load MIL weights per section
+            self.MIL_weights = pd.read_csv(pkg_root / "assets" / "MIL_weights.csv")
+            self.non_empty_sections=self.MIL_weights['Section']
+            self.section_weights=self.MIL_weights.iloc[:,1:].to_numpy()
+
+            # Load candidate reports
+            candidates_dir = pkg_root / "model_data" / "candidates_data"
+            self.candidate_studies=list(pd.read_csv(candidates_dir / "candidate_studies.csv")['Study'])
+            candidate_embeddings_p1=torch.load(candidates_dir / "candidate_embeddings_p1.pt", weights_only=True)
+            candidate_embeddings_p2=torch.load(candidates_dir / "candidate_embeddings_p2.pt", weights_only=True)
+            self.candidate_embeddings=torch.cat((candidate_embeddings_p1,candidate_embeddings_p2),dim=0)
+            candidate_reports=pd.read_pickle(candidates_dir / "candidate_reports.pkl")
+            self.candidate_reports = [utils.phrase_decode(vec_phr) for vec_phr in tqdm(candidate_reports)]
+            self.candidate_labels = pd.read_pickle(candidates_dir / "candidate_labels.pkl")
+            self.section_to_phenotypes = pd.read_pickle(pkg_root / "assets" / "section_to_phenotypes.pkl")
 
     def process_dicoms(self,INPUT):
         """

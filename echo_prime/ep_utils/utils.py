@@ -9,8 +9,15 @@ import cv2
 import pydicom as dicom
 import torch
 
-with open("assets/per_section.json", encoding="utf-8") as f:
-    json_data = json.load(f)
+_PKG_ROOT = Path(__file__).resolve().parent.parent
+
+_json_data = None
+def _get_json_data():
+    global _json_data
+    if _json_data is None:
+        with open(_PKG_ROOT / "assets" / "per_section.json", encoding="utf-8") as f:
+            _json_data = json.load(f)
+    return _json_data
 
 _ybr_to_rgb_lut = None
 
@@ -133,7 +140,7 @@ def extract_features(report: str) -> list:
     'dilated_ivc',
     'pulmonary_artery_pressure_continuous']
 
-    sorted_json_data = {k:json_data[k] for k in sorted_features}
+    sorted_json_data = {k:_get_json_data()[k] for k in sorted_features}
     features=[]
     for key,value in sorted_json_data.items():
         if value['mode'] == "regression":
